@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgriLedger Setup Guide</title>
+<link rel="icon" href="icons/favicon-64.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@700;800&family=Mukta:wght@400;600;700&display=swap">
+<style>
+:root{--bg:#f6f2e2;--card:#fffdf5;--ink:#1d2917;--ink2:#44523a;--green:#2e7d32;--dark:#1d5a26;--gold:#f0b429;--line:rgba(70,56,20,.14);--warn:rgba(240,180,41,.22)}
+@media (prefers-color-scheme:dark){:root{--bg:#131b11;--card:#1b2518;--ink:#eef3e4;--ink2:#c8d3ba;--green:#7cc47f;--line:rgba(220,232,190,.12);--warn:rgba(242,193,78,.15)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Mukta','Segoe UI',system-ui,sans-serif;font-size:17px;line-height:1.55}
+header{background:linear-gradient(170deg,#1d5a26,#2e7d32);color:#f3f8ec;padding:28px max(16px,env(safe-area-inset-left,0px)) 24px}
+header .in{max-width:760px;margin:0 auto;display:flex;gap:16px;align-items:center}
+header img{width:64px;height:64px;border-radius:16px}
+h1,h2{font-family:'Baloo 2','Segoe UI',sans-serif;line-height:1.2;margin:0}
+h1{font-size:30px}
+header p{margin:4px 0 0;opacity:.85}
+main{max-width:760px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-left,0px)) 60px;display:flex;flex-direction:column;gap:18px}
+section{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:20px 22px}
+h2{font-size:23px;color:var(--green);margin-bottom:6px}
+.time{display:inline-block;background:var(--warn);border-radius:999px;padding:0 10px;font-size:14px;font-weight:700;margin-bottom:8px}
+ol{padding-left:22px;margin:8px 0 0}
+li{margin:0 0 12px}
+b{font-weight:700}
+code,kbd{font-family:ui-monospace,Consolas,monospace;font-size:14px;background:rgba(46,125,50,.1);padding:1px 6px;border-radius:6px;overflow-wrap:anywhere}
+.note{background:var(--warn);border-radius:14px;padding:12px 14px;font-size:15.5px}
+.codebox{position:relative;margin-top:10px}
+pre{margin:0;max-height:260px;overflow:auto;background:#10180e;color:#d8ecc8;border-radius:14px;padding:14px;font-size:12.5px;line-height:1.45}
+button{font:inherit;font-weight:700;border:0;border-radius:999px;padding:10px 18px;background:var(--gold);color:#2a1d00;cursor:pointer;margin-top:10px}
+a{color:var(--green);font-weight:700}
+</style>
+</head>
+<body>
+<header><div class="in"><img src="icons/icon-192.png" alt=""><div><h1>AgriLedger setup</h1><p>Phone app + Google Sheet copy, for Sethji and Sons</p></div></div></header>
+<main>
+<section>
+  <p>Done once. Afterwards the app works on the phone even with no signal, and every entry is copied to a Google Sheet in <b>anujagrawalsha7@gmail.com</b>.</p>
+  <p class="note" style="margin-top:10px">Part A is easiest on a computer. Parts B and C are on the phone.</p>
+</section>
+
+<section>
+  <h2>A. Make the Google Sheet</h2>
+  <span class="time">About 8 minutes</span>
+  <ol>
+    <li>Sign in to Google as <b>anujagrawalsha7@gmail.com</b>. Open <a href="https://sheets.new" target="_blank" rel="noopener">sheets.new</a> to make a new Sheet. Name it <b>AgriLedger data</b>.</li>
+    <li>In the Sheet, open <b>Extensions › Apps Script</b>. Delete everything in the editor, then paste the whole script below. Press the save icon. Name the project <b>AgriLedger sync</b>.
+      <div class="codebox"><pre id="code">/**
+ * AgriLedger → Google Sheet sync
+ * Paste this whole file into Extensions › Apps Script of the Google Sheet,
+ * then follow SETUP-GUIDE.html. The app sends records; this script writes
+ * them into one tab per section (Farmers, Purchases, Payments …).
+ * The app is the place to make corrections; this Sheet is a live copy.
+ */
+var ALLOWED_EMAIL = &#x27;anujagrawalsha7@gmail.com&#x27;;   // only this Google account may own the Sheet
+var INR = &#x27;[&gt;=10000000]##\\,##\\,##\\,##0.00;[&gt;=100000]##\\,##\\,##0.00;##,##0.00&#x27;;
+
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu(&#x27;AgriLedger&#x27;)
+    .addItem(&#x27;1. Set up (run once)&#x27;, &#x27;setup&#x27;)
+    .addItem(&#x27;2. Show sync key&#x27;, &#x27;showKey&#x27;)
+    .addItem(&#x27;Make a new sync key&#x27;, &#x27;resetKey&#x27;)
+    .addToUi();
+}
+
+function checkOwner_() {
+  var me = (Session.getEffectiveUser().getEmail() || &#x27;&#x27;).toLowerCase();
+  if (me &amp;&amp; me !== ALLOWED_EMAIL.toLowerCase()) {
+    throw new Error(&#x27;Please open this Sheet signed in as &#x27; + ALLOWED_EMAIL + &#x27; (now signed in as &#x27; + me + &#x27;).&#x27;);
+  }
+  return me;
+}
+
+function setup() {
+  checkOwner_();
+  var props = PropertiesService.getScriptProperties();
+  if (!props.getProperty(&#x27;SYNC_KEY&#x27;)) props.setProperty(&#x27;SYNC_KEY&#x27;, newKey_());
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var info = ss.getSheetByName(&#x27;Read me&#x27;) || ss.insertSheet(&#x27;Read me&#x27;, 0);
+  info.clear();
+  info.getRange(1, 1, 6, 1).setValues([
+    [&#x27;AgriLedger — live copy of the app&#x27;],
+    [&#x27;Each tab is filled by the AgriLedger app on the phone. Make corrections in the app, not here.&#x27;],
+    [&#x27;Money is in rupees. Quantities are in quintals. Dates are DD-MM-YYYY.&#x27;],
+    [&#x27;Government procurement values are agency records, not your turnover.&#x27;],
+    [&#x27;Menu AgriLedger › Show sync key gives the key to paste into the app (Settings › Google Sheet).&#x27;],
+    [&#x27;Owner: &#x27; + ALLOWED_EMAIL]
+  ]);
+  info.getRange(1, 1).setFontWeight(&#x27;bold&#x27;).setFontSize(14).setFontColor(&#x27;#1d5a26&#x27;);
+  info.setColumnWidth(1, 720);
+  showKey();
+}
+
+function showKey() {
+  checkOwner_();
+  var key = PropertiesService.getScriptProperties().getProperty(&#x27;SYNC_KEY&#x27;);
+  var msg = key ? &#x27;Your sync key (paste it into the app: Settings › Google Sheet):\n\n&#x27; + key
+                : &#x27;Run &quot;AgriLedger › 1. Set up&quot; first.&#x27;;
+  try { SpreadsheetApp.getUi().alert(&#x27;AgriLedger&#x27;, msg, SpreadsheetApp.getUi().ButtonSet.OK); } catch (e) { Logger.log(msg); }
+}
+
+function resetKey() {
+  checkOwner_();
+  PropertiesService.getScriptProperties().setProperty(&#x27;SYNC_KEY&#x27;, newKey_());
+  showKey();
+}
+
+function newKey_() {
+  return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, &#x27;&#x27;).slice(0, 40);
+}
+
+function out_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet() {
+  return HtmlService.createHtmlOutput(&#x27;&lt;p style=&quot;font-family:sans-serif&quot;&gt;AgriLedger sync is running. Paste this page\&#x27;s address into the app.&lt;/p&gt;&#x27;);
+}
+
+function doPost(e) {
+  var body;
+  try { body = JSON.parse(e.postData.contents); } catch (x) { return out_({ ok: false, error: &#x27;bad request&#x27; }); }
+  var key = PropertiesService.getScriptProperties().getProperty(&#x27;SYNC_KEY&#x27;);
+  if (!key || body.key !== key) return out_({ ok: false, error: &#x27;wrong key&#x27; });
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (body.ping) return out_({ ok: true, sheet: ss.getName(), owner: Session.getEffectiveUser().getEmail() });
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(28000)) return out_({ ok: false, error: &#x27;The Sheet is busy. Will try again.&#x27; });
+  try {
+    var n = 0;
+    for (var name in body.tabs) n += upsert_(ss, name, body.tabs[name]);
+    return out_({ ok: true, rows: n });
+  } catch (err) {
+    return out_({ ok: false, error: String(err &amp;&amp; err.message || err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* Write rows into a tab: update the row with the same ID, or add a new row. */
+function upsert_(ss, name, t) {
+  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+  var heads = t.cols.map(function (c) { return c.h; }), w = heads.length;
+  var last = sh.getLastRow();
+  var cur = last ? sh.getRange(1, 1, 1, Math.max(w, sh.getLastColumn())).getValues()[0] : [];
+  if (heads.join(&#x27;|&#x27;) !== cur.slice(0, w).join(&#x27;|&#x27;)) {
+    sh.getRange(1, 1, 1, w).setValues([heads]).setFontWeight(&#x27;bold&#x27;).setBackground(&#x27;#1d5a26&#x27;).setFontColor(&#x27;#ffffff&#x27;);
+    sh.setFrozenRows(1);
+    t.cols.forEach(function (c, i) {
+      var col = sh.getRange(2, i + 1, sh.getMaxRows() - 1, 1);
+      if (c.t === &#x27;d&#x27;) col.setNumberFormat(&#x27;dd-mm-yyyy&#x27;);
+      else if (c.t === &#x27;m&#x27;) col.setNumberFormat(INR);
+      else if (c.t === &#x27;q&#x27;) col.setNumberFormat(&#x27;0.00##&#x27;);
+      else if (c.t === &#x27;t&#x27;) col.setNumberFormat(&#x27;@&#x27;);
+    });
+    if (last === 0) last = 1;
+  }
+  // newest version of each ID wins
+  var byId = {}, order = [];
+  t.rows.forEach(function (r) {
+    var id = String(r[0]);
+    if (!(id in byId)) order.push(id);
+    byId[id] = r.map(function (v, i) { return t.cols[i].t === &#x27;d&#x27; ? toDate_(v) : v; });
+  });
+  last = Math.max(sh.getLastRow(), 1);
+  var ids = last &gt; 1 ? sh.getRange(2, 1, last - 1, 1).getValues() : [];
+  var pos = {};
+  for (var i = 0; i &lt; ids.length; i++) pos[String(ids[i][0])] = i + 2;
+  var updates = [], adds = [];
+  order.forEach(function (id) { if (pos[id]) updates.push([pos[id], byId[id]]); else adds.push(byId[id]); });
+  if (updates.length &gt; 25) {
+    var range = sh.getRange(2, 1, last - 1, w), data = range.getValues();
+    updates.forEach(function (u) { data[u[0] - 2] = u[1]; });
+    range.setValues(data);
+  } else {
+    updates.forEach(function (u) { sh.getRange(u[0], 1, 1, w).setValues([u[1]]); });
+  }
+  if (adds.length) sh.getRange(last + 1, 1, adds.length, w).setValues(adds);
+  return order.length;
+}
+
+function toDate_(v) {
+  if (!v) return &#x27;&#x27;;
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : v;
+}
+</pre><button type="button" id="copy">Copy the script</button></div></li>
+    <li>Go back to the Sheet and reload the page. A new menu <b>AgriLedger</b> appears. Click <b>AgriLedger › 1. Set up</b>.</li>
+    <li>Google asks for permission. Click <b>Continue</b>, choose the account, then <b>Advanced › Go to AgriLedger sync</b> and <b>Allow</b>. Google shows this warning for every private script. If nothing else happens, click <b>1. Set up</b> again.</li>
+    <li>A box shows the <b>sync key</b>. Keep it; you will paste it into the phone. You can see it again any time with <b>AgriLedger › 2. Show sync key</b>.</li>
+    <li>Back in Apps Script, click <b>Deploy › New deployment</b>. Click the gear and choose <b>Web app</b>. Set:
+      <br>• Execute as: <b>Me (anujagrawalsha7@gmail.com)</b>
+      <br>• Who has access: <b>Anyone</b>
+      <br>Click <b>Deploy</b>, then copy the <b>Web app URL</b>. It ends with <code>/exec</code>.</li>
+  </ol>
+  <p class="note">"Anyone" only lets the phone reach the script. Nothing is written without the secret sync key, and the Sheet itself stays private to anujagrawalsha7@gmail.com.</p>
+</section>
+
+<section>
+  <h2>B. Install the app on the phone</h2>
+  <span class="time">2 minutes</span>
+  <ol>
+    <li>On the phone, open the AgriLedger link in <b>Chrome</b>.</li>
+    <li>Tap <b>Install</b> when it appears (or Chrome menu <b>⋮ › Install app / Add to Home screen</b>). AgriLedger now has its own icon and opens without the browser bar.</li>
+    <li>Open it from the home screen. Go to <b>Settings › PIN &amp; privacy</b> and set a PIN, so only you can open it.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>C. Connect the phone to the Sheet</h2>
+  <span class="time">1 minute</span>
+  <ol>
+    <li>In the app open <b>Settings › Google Sheet</b>.</li>
+    <li>Paste the <b>Web app URL</b> and the <b>sync key</b>. Tap <b>Test and connect</b>.</li>
+    <li>The app shows the Sheet name and owner, then sends all records. The menu shows <b>Sheet up to date</b> when done.</li>
+  </ol>
+  <p class="note">With no signal, entries are kept on the phone and sent automatically when the internet is back.</p>
+</section>
+
+<section>
+  <h2>Good to know</h2>
+  <ol>
+    <li><b>Make corrections in the app</b>, not in the Sheet. The Sheet is a live copy; the app keeps the audit log and balances right.</li>
+    <li><b>New phone?</b> Install the app again, then use <b>Settings › Backup &amp; restore</b> with your latest backup file.</li>
+    <li><b>Changed the script?</b> Use <b>Deploy › Manage deployments › edit › Version: New version</b>, so the same URL keeps working.</li>
+    <li><b>Lost the key or think someone saw it?</b> Use <b>AgriLedger › Make a new sync key</b> and paste the new key in the app.</li>
+  </ol>
+</section>
+</main>
+<script>
+document.getElementById('copy').addEventListener('click', async e => {
+  const t = document.getElementById('code').textContent;
+  try { await navigator.clipboard.writeText(t); e.target.textContent = 'Copied ✓'; }
+  catch (x) { const r = document.createRange(); r.selectNodeContents(document.getElementById('code')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); e.target.textContent = 'Selected: press Ctrl+C'; }
+});
+</script>
+</body>
+</html>
